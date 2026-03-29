@@ -1,0 +1,99 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (request.auth.token.email == "paradigm070755@gmail.com" ||
+         exists(/databases/$(database)/documents/admin_emails/$(request.auth.token.email)));
+    }
+
+    function isValidEmail(email) {
+      return email is string &&
+        email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidContact(data) {
+      return data.keys().hasAll(['companyName', 'name', 'email', 'content', 'createdAt']) &&
+             data.keys().hasOnly(['companyName', 'name', 'email', 'content', 'createdAt']) &&
+             data.companyName is string && data.companyName.size() >= 1 && data.companyName.size() <= 100 &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 100 &&
+             isValidEmail(data.email) &&
+             data.content is string && data.content.size() >= 1 && data.content.size() <= 2000 &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidJob(data) {
+      return data.keys().hasAll(['title', 'description', 'location', 'employmentType', 'status', 'createdAt']) &&
+             data.keys().hasOnly(['title', 'description', 'requirements', 'location', 'salary', 'employmentType', 'status', 'createdAt', 'updatedAt']) &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 200 &&
+             data.description is string && data.description.size() >= 1 && data.description.size() <= 5000 &&
+             data.location is string && data.location.size() >= 1 && data.location.size() <= 200 &&
+             data.employmentType is string && data.employmentType.size() >= 1 && data.employmentType.size() <= 100 &&
+             data.status in ['active', 'closed'] &&
+             data.createdAt is timestamp &&
+             (!('updatedAt' in data) || (data.updatedAt is timestamp));
+    }
+
+    function isValidRecruit(data) {
+      return data.keys().hasAll(['name', 'email', 'phone', 'createdAt']) &&
+             data.keys().hasOnly([
+               'jobId', 'name', 'nameKanji', 'nameKana',
+               'email', 'phone', 'photoUrl',
+               'lineId', 'referredBy',
+               'gender', 'birthDate', 'age',
+               'address', 'hasCar',
+               'nearestStation', 'transportToStation',
+               'qualifications',
+               'availableFrom', 'availablePeriod', 'availableShift',
+               'education', 'educationDate', 'educationName',
+               'workHistory1', 'workHistory2', 'workHistory3',
+               'work1Company', 'work1JobType', 'work1Content', 'work1Period', 'work1Details',
+               'work2Company', 'work2JobType', 'work2Content', 'work2Period', 'work2Details',
+               'work3Company', 'work3JobType', 'work3Content', 'work3Period', 'work3Details',
+               'selfPr',
+               'emergencyContact', 'emergencyFurigana', 'emergencyName', 'emergencyRelation', 'emergencyTel',
+               'bankAccount', 'bankName', 'bankBranch', 'bankType', 'bankNumber', 'bankHolder',
+               'jobTitle', 'employmentType', 'desiredSalary', 'workLocation', 'experience',
+               'status', 'createdAt'
+             ]) &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 100 &&
+             isValidEmail(data.email) &&
+             data.phone is string && data.phone.size() >= 1 && data.phone.size() <= 50 &&
+             data.createdAt is timestamp;
+    }
+
+    match /jobs/{jobId} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidJob(request.resource.data);
+    }
+
+    match /contacts/{contactId} {
+      allow create: if isValidContact(request.resource.data);
+      allow read: if isAdmin();
+      allow update, delete: if false;
+    }
+
+    match /recruits/{recruitId} {
+      allow create: if isValidRecruit(request.resource.data);
+      allow read, update, delete: if isAdmin();
+    }
+
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow write: if isAdmin();
+    }
+
+    match /admin_emails/{email} {
+      allow read, write: if isAdmin();
+    }
+
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}
