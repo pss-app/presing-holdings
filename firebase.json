@@ -8,7 +8,7 @@
     "rules": "storage.rules"
   },
   "hosting": {
-    "site": "presing-holdings",
+    "site": "presing",
     "public": "dist",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "rewrites": [{ "source": "**", "destination": "/index.html" }]
