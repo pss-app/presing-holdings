@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
+import {
   LayoutDashboard,
   Users,
   MessageSquare,
@@ -26,29 +26,11 @@ import {
   Loader2,
   ShieldCheck,
   UserPlus,
-  Table2
+  Table2,
+  Camera
 } from 'lucide-react';
-import { 
-  auth, 
-  db, 
-  googleProvider, 
-  signInWithPopup, 
-  signOut, 
-  onAuthStateChanged, 
-  collection, 
-  query, 
-  orderBy, 
-  onSnapshot, 
-  User,
-  handleFirestoreError,
-  OperationType,
-  addDoc,
-  setDoc,
-  updateDoc,
-  deleteDoc,
-  doc,
-  serverTimestamp
-} from '../firebase';
+import { supabase } from '../supabase';
+import type { User } from '@supabase/supabase-js';
 
 interface ContactEntry {
   id: string;
@@ -56,7 +38,7 @@ interface ContactEntry {
   name: string;
   email: string;
   content: string;
-  createdAt: any;
+  created_at: string;
 }
 
 interface RecruitEntry {
@@ -102,8 +84,10 @@ interface RecruitEntry {
   desiredSalary?: string;
   workLocation?: string;
   experience?: string;
+  interviewNotes?: string;
+  interviewDate?: string;
   status: string;
-  createdAt: any;
+  created_at: string;
 }
 
 interface Job {
@@ -115,7 +99,7 @@ interface Job {
   description: string;
   requirements: string;
   status: 'active' | 'closed';
-  createdAt: any;
+  created_at: string;
 }
 
 export const Dashboard = () => {
@@ -125,8 +109,8 @@ export const Dashboard = () => {
   const [contacts, setContacts] = React.useState<ContactEntry[]>([]);
   const [recruits, setRecruits] = React.useState<RecruitEntry[]>([]);
   const [jobs, setJobs] = React.useState<Job[]>([]);
-  const [adminEmails, setAdminEmails] = React.useState<{email: string; name?: string; company?: string}[]>([]);
-  const [editingAdmin, setEditingAdmin] = React.useState<{email: string; name?: string; company?: string} | null>(null);
+  const [adminEmails, setAdminEmails] = React.useState<{email: string; name?: string; role?: string}[]>([]);
+  const [editingAdmin, setEditingAdmin] = React.useState<{email: string; name?: string; role?: string} | null>(null);
   const [newAdminName, setNewAdminName] = React.useState('');
   const [newAdminRole, setNewAdminRole] = React.useState('staff');
   const [searchTerm, setSearchTerm] = React.useState('');
@@ -138,102 +122,87 @@ export const Dashboard = () => {
   const [newAdminEmail, setNewAdminEmail] = React.useState('');
   const [editingRecruit, setEditingRecruit] = React.useState<RecruitEntry | null>(null);
   const [isRecruitEditOpen, setIsRecruitEditOpen] = React.useState(false);
-
+  const [recruitDetailTab, setRecruitDetailTab] = React.useState<'info' | 'interview' | 'bank'>('info');
+  const [editPhotoFile, setEditPhotoFile] = React.useState<File | null>(null);
+  const [editPhotoPreview, setEditPhotoPreview] = React.useState<string | null>(null);
+  const [loginEmail, setLoginEmail] = React.useState('');
+  const [loginPassword, setLoginPassword] = React.useState('');
+  const [loginName, setLoginName] = React.useState('');
   const [loginError, setLoginError] = React.useState<string | null>(null);
+  const [loginMode, setLoginMode] = React.useState<'login' | 'signup'>('login');
+  const [signupDone, setSignupDone] = React.useState(false);
+  const [pendingStaff, setPendingStaff] = React.useState<{id: string; email: string; name: string; created_at: string}[]>([]);
 
-  const BOOTSTRAP_ADMIN = 'paradigm070755@gmail.com';
+  const BOOTSTRAP_ADMIN = 'presingsocialservice@gmail.com';
+
+  const fetchData = React.useCallback(async () => {
+    const [c, r, j, a, p] = await Promise.all([
+      supabase.from('contacts').select('*').order('created_at', { ascending: false }),
+      supabase.from('recruits').select('*').order('created_at', { ascending: false }),
+      supabase.from('jobs').select('*').order('created_at', { ascending: false }),
+      supabase.from('admin_emails').select('*'),
+      supabase.from('pending_staff').select('*').order('created_at', { ascending: false }),
+    ]);
+    if (c.data) setContacts(c.data as ContactEntry[]);
+    if (r.data) setRecruits(r.data as RecruitEntry[]);
+    if (j.data) setJobs(j.data as Job[]);
+    if (a.data) setAdminEmails(a.data);
+    if (p.data) setPendingStaff(p.data);
+  }, []);
 
   React.useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      if (!currentUser) {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      if (!session?.user) setLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+      if (!session?.user) {
         setIsAdmin(false);
         setLoading(false);
       }
     });
-    return () => unsubscribe();
+    return () => subscription.unsubscribe();
   }, []);
 
   React.useEffect(() => {
     if (!user) return;
 
-    // Check if user is bootstrap admin
     if (user.email === BOOTSTRAP_ADMIN) {
       setIsAdmin(true);
       setLoading(false);
       return;
     }
 
-    // Check if user is in admin_emails collection
-    const unsubscribe = onSnapshot(doc(db, 'admin_emails', user.email!), (docSnap) => {
-      setIsAdmin(docSnap.exists());
-      setLoading(false);
-    }, (err) => {
-      console.error('Admin check error:', err);
-      setIsAdmin(false);
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
+    supabase.from('admin_emails').select('email').eq('email', user.email!).maybeSingle()
+      .then(({ data }) => {
+        setIsAdmin(!!data);
+        setLoading(false);
+      });
   }, [user]);
 
   React.useEffect(() => {
     if (!isAdmin) return;
+    fetchData();
+  }, [isAdmin, fetchData]);
 
-    const qContacts = query(collection(db, 'contacts'), orderBy('createdAt', 'desc'));
-    const unsubscribeContacts = onSnapshot(qContacts, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ContactEntry));
-      setContacts(data);
-    }, (err) => handleFirestoreError(err, OperationType.GET, 'contacts'));
-
-    const qRecruits = query(collection(db, 'recruits'), orderBy('createdAt', 'desc'));
-    const unsubscribeRecruits = onSnapshot(qRecruits, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as RecruitEntry));
-      setRecruits(data);
-    }, (err) => handleFirestoreError(err, OperationType.GET, 'recruits'));
-
-    const qJobs = query(collection(db, 'jobs'), orderBy('createdAt', 'desc'));
-    const unsubscribeJobs = onSnapshot(qJobs, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Job));
-      setJobs(data);
-    }, (err) => handleFirestoreError(err, OperationType.GET, 'jobs'));
-
-    const qAdmins = query(collection(db, 'admin_emails'));
-    const unsubscribeAdmins = onSnapshot(qAdmins, (snapshot) => {
-      const emails = snapshot.docs.map(doc => ({ ...(doc.data() as any), email: doc.id }));
-      setAdminEmails(emails);
-    }, (err) => console.error('Error fetching admins:', err));
-
-    return () => {
-      unsubscribeContacts();
-      unsubscribeRecruits();
-      unsubscribeJobs();
-      unsubscribeAdmins();
-    };
-  }, [isAdmin]);
-
-  const handleLogin = async () => {
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
     setLoginError(null);
-    try {
-      await signInWithPopup(auth, googleProvider);
-    } catch (error: any) {
-      console.error('Login error:', error);
-      if (error.code === 'auth/popup-blocked') {
-        setLoginError('ポップアップがブロックされました。ブラウザの設定で許可してください。');
-      } else if (error.code === 'auth/unauthorized-domain') {
-        setLoginError('このドメインはFirebaseで許可されていません。Firebaseコンソールで設定が必要です。');
-      } else {
-        setLoginError('ログイン中にエラーが発生しました。: ' + error.message);
-      }
+    if (loginMode === 'signup') {
+      const { error } = await supabase.auth.signUp({ email: loginEmail, password: loginPassword });
+      if (error) { setLoginError(error.message); return; }
+      await supabase.from('pending_staff').insert({ email: loginEmail, name: loginName });
+      setSignupDone(true);
+    } else {
+      const { error } = await supabase.auth.signInWithPassword({ email: loginEmail, password: loginPassword });
+      if (error) setLoginError('メールアドレスまたはパスワードが違います。');
     }
   };
 
   const handleLogout = async () => {
-    try {
-      await signOut(auth);
-    } catch (error) {
-      console.error('Logout error:', error);
-    }
+    await supabase.auth.signOut();
   };
 
   const handleJobSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -248,20 +217,19 @@ export const Dashboard = () => {
       description: formData.get('description') as string,
       requirements: formData.get('requirements') as string,
       status: formData.get('status') as 'active' | 'closed',
-      updatedAt: serverTimestamp(),
     };
 
     try {
       if (editingJob) {
-        await updateDoc(doc(db, 'jobs', editingJob.id), jobData);
+        await supabase.from('jobs').update(jobData).eq('id', editingJob.id);
       } else {
-        await addDoc(collection(db, 'jobs'), { ...jobData, createdAt: serverTimestamp() });
+        await supabase.from('jobs').insert(jobData);
       }
       setIsJobModalOpen(false);
       setEditingJob(null);
+      await fetchData();
     } catch (err) {
       console.error('Job submit error:', err);
-      handleFirestoreError(err, OperationType.WRITE, 'jobs');
     } finally {
       setIsSubmitting(false);
     }
@@ -274,10 +242,32 @@ export const Dashboard = () => {
     const fd = new FormData(form);
     const data: Record<string, string> = {};
     fd.forEach((v, k) => { data[k] = v as string; });
+
+    // Upload photo if a new one was selected
+    if (editPhotoFile) {
+      const filePath = `${Date.now()}-${editPhotoFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('recruit-photos')
+        .upload(filePath, editPhotoFile);
+      if (uploadError) {
+        alert('写真のアップロードに失敗しました。');
+        return;
+      }
+      if (uploadData) {
+        const { data: urlData } = supabase.storage
+          .from('recruit-photos')
+          .getPublicUrl(uploadData.path);
+        data.photoUrl = urlData.publicUrl;
+      }
+    }
+
     try {
-      await updateDoc(doc(db, 'recruits', editingRecruit.id), data);
+      await supabase.from('recruits').update(data).eq('id', editingRecruit.id);
       setIsRecruitEditOpen(false);
       setEditingRecruit(null);
+      setEditPhotoFile(null);
+      setEditPhotoPreview(null);
+      await fetchData();
     } catch (err) {
       console.error('Update error:', err);
     }
@@ -285,21 +275,16 @@ export const Dashboard = () => {
 
   const handleDeleteJob = async (id: string) => {
     if (!window.confirm('この案件を削除してもよろしいですか？')) return;
-    try {
-      await deleteDoc(doc(db, 'jobs', id));
-      if (selectedEntry?.id === id) setSelectedEntry(null);
-    } catch (err) {
-      console.error('Delete job error:', err);
-      handleFirestoreError(err, OperationType.DELETE, 'jobs');
-    }
+    await supabase.from('jobs').delete().eq('id', id);
+    if (selectedEntry?.id === id) setSelectedEntry(null);
+    await fetchData();
   };
 
   const updateRecruitStatus = async (id: string, status: string) => {
-    try {
-      await updateDoc(doc(db, 'recruits', id), { status });
-    } catch (err) {
-      console.error('Update status error:', err);
-      handleFirestoreError(err, OperationType.UPDATE, 'recruits');
+    await supabase.from('recruits').update({ status }).eq('id', id);
+    setRecruits(prev => prev.map(r => r.id === id ? { ...r, status } : r));
+    if (selectedEntry?.id === id) {
+      setSelectedEntry(prev => prev ? { ...prev as RecruitEntry, status } : prev);
     }
   };
 
@@ -307,15 +292,16 @@ export const Dashboard = () => {
     e.preventDefault();
     if (!newAdminEmail) return;
     try {
-      await setDoc(doc(db, 'admin_emails', newAdminEmail.toLowerCase()), {
+      await supabase.from('admin_emails').insert({
+        email: newAdminEmail.toLowerCase(),
         name: newAdminName,
         role: newAdminRole,
-        addedAt: serverTimestamp(),
-        addedBy: user?.email
+        addedBy: user?.email,
       });
       setNewAdminEmail('');
       setNewAdminName('');
       setNewAdminRole('staff');
+      await fetchData();
     } catch (err) {
       console.error('Add admin error:', err);
       alert('管理者の追加に失敗しました。');
@@ -327,11 +313,12 @@ export const Dashboard = () => {
     if (!editingAdmin) return;
     const fd = new FormData(e.currentTarget);
     try {
-      await updateDoc(doc(db, 'admin_emails', editingAdmin.email), {
+      await supabase.from('admin_emails').update({
         name: fd.get('name') as string,
         role: fd.get('role') as string,
-      });
+      }).eq('email', editingAdmin.email);
       setEditingAdmin(null);
+      await fetchData();
     } catch (err) {
       console.error('Update admin error:', err);
       alert('更新に失敗しました。');
@@ -344,12 +331,8 @@ export const Dashboard = () => {
       return;
     }
     if (!window.confirm(`${email} を管理者から削除しますか？`)) return;
-    try {
-      await deleteDoc(doc(db, 'admin_emails', email.toLowerCase()));
-    } catch (err) {
-      console.error('Remove admin error:', err);
-      alert('管理者の削除に失敗しました。');
-    }
+    await supabase.from('admin_emails').delete().eq('email', email.toLowerCase());
+    await fetchData();
   };
 
   if (loading) {
@@ -363,7 +346,7 @@ export const Dashboard = () => {
   if (!user) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
           className="max-w-md w-full bg-white p-8 rounded-3xl shadow-xl text-center border border-gray-100"
@@ -372,22 +355,65 @@ export const Dashboard = () => {
             <LayoutDashboard size={40} />
           </div>
           <h1 className="text-2xl font-bold text-brand-navy mb-2">Admin Dashboard</h1>
-          <p className="text-gray-500 mb-8">管理者専用ページです。ログインしてください。</p>
-          
-          {loginError && (
-            <div className="mb-6 p-4 bg-red-50 text-red-600 rounded-xl text-sm flex items-center space-x-2">
-              <AlertCircle size={16} />
-              <span>{loginError}</span>
-            </div>
-          )}
+          <p className="text-gray-500 mb-8">管理者専用ページです。</p>
 
-          <button
-            onClick={handleLogin}
-            className="w-full py-4 bg-brand-navy text-white font-bold rounded-xl hover:bg-opacity-90 transition-all flex items-center justify-center shadow-lg"
-          >
-            <LogIn className="mr-2" size={20} />
-            Googleでログイン
-          </button>
+          {/* Tab */}
+          <div className="flex bg-gray-100 p-1 rounded-xl mb-6">
+            <button onClick={() => { setLoginMode('login'); setLoginError(null); setSignupDone(false); }} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${loginMode === 'login' ? 'bg-white shadow text-brand-navy' : 'text-gray-400'}`}>ログイン</button>
+            <button onClick={() => { setLoginMode('signup'); setLoginError(null); setSignupDone(false); }} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${loginMode === 'signup' ? 'bg-white shadow text-brand-navy' : 'text-gray-400'}`}>新規登録</button>
+          </div>
+
+          {signupDone ? (
+            <div className="p-4 bg-green-50 text-green-700 rounded-xl text-sm text-center">
+              <p className="font-bold mb-1">登録完了</p>
+              <p>管理者に承認を依頼してください。承認後にログインできます。</p>
+            </div>
+          ) : (
+            <>
+              {loginError && (
+                <div className="mb-4 p-4 bg-red-50 text-red-600 rounded-xl text-sm flex items-center space-x-2">
+                  <AlertCircle size={16} />
+                  <span>{loginError}</span>
+                </div>
+              )}
+              <form onSubmit={handleLogin} className="space-y-4 text-left">
+                {loginMode === 'signup' && (
+                  <input
+                    type="text"
+                    value={loginName}
+                    onChange={e => setLoginName(e.target.value)}
+                    placeholder="氏名 *"
+                    required
+                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-brand-blue"
+                  />
+                )}
+                <input
+                  type="email"
+                  value={loginEmail}
+                  onChange={e => setLoginEmail(e.target.value)}
+                  placeholder="メールアドレス"
+                  required
+                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-brand-blue"
+                />
+                <input
+                  type="password"
+                  value={loginPassword}
+                  onChange={e => setLoginPassword(e.target.value)}
+                  placeholder="パスワード（6文字以上）"
+                  required
+                  minLength={6}
+                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl outline-none focus:ring-2 focus:ring-brand-blue"
+                />
+                <button
+                  type="submit"
+                  className="w-full py-4 bg-brand-navy text-white font-bold rounded-xl hover:bg-opacity-90 transition-all flex items-center justify-center shadow-lg"
+                >
+                  <LogIn className="mr-2" size={20} />
+                  {loginMode === 'login' ? 'ログイン' : 'アカウントを作成'}
+                </button>
+              </form>
+            </>
+          )}
         </motion.div>
       </div>
     );
@@ -412,7 +438,7 @@ export const Dashboard = () => {
     );
   }
 
-  const filteredData = activeTab === 'contacts' 
+  const filteredData = activeTab === 'contacts'
     ? contacts.filter(c => c.name.includes(searchTerm) || c.companyName.includes(searchTerm) || c.content.includes(searchTerm))
     : activeTab === 'recruits'
     ? recruits.filter(r => r.name.includes(searchTerm) || (r.nameKana || '').includes(searchTerm) || (r.nearestStation || '').includes(searchTerm) || (r.education || '').includes(searchTerm))
@@ -429,11 +455,12 @@ export const Dashboard = () => {
             </div>
             <span className="font-bold text-xl tracking-tight">Admin Console</span>
           </div>
-          
+
           <div className="flex items-center space-x-3 p-3 bg-white/5 rounded-xl">
-            <img src={user.photoURL || ''} alt="" className="w-10 h-10 rounded-full border border-white/20" referrerPolicy="no-referrer" />
+            <div className="w-10 h-10 bg-brand-blue text-white rounded-full flex items-center justify-center font-bold text-lg shrink-0">
+              {user.email?.[0].toUpperCase()}
+            </div>
             <div className="overflow-hidden">
-              <p className="text-sm font-bold truncate">{user.displayName}</p>
               <p className="text-xs text-gray-400 truncate">{user.email}</p>
             </div>
           </div>
@@ -515,7 +542,7 @@ export const Dashboard = () => {
                'お問い合わせ一覧'}
             </h2>
             {activeTab === 'jobs' && (
-              <button 
+              <button
                 onClick={() => { setEditingJob(null); setIsJobModalOpen(true); }}
                 className="hidden md:flex items-center space-x-2 px-6 py-3 bg-brand-blue text-white rounded-2xl hover:bg-opacity-90 transition-all shadow-lg hover:-translate-y-0.5 active:translate-y-0"
               >
@@ -524,7 +551,7 @@ export const Dashboard = () => {
               </button>
             )}
           </div>
-          
+
           <div className="flex items-center space-x-4">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
@@ -541,7 +568,6 @@ export const Dashboard = () => {
 
         {/* Content Area */}
         <div className="flex-1 flex overflow-hidden">
-          {/* List or Staff Management */}
           {activeTab === 'recruitTable' ? (
             <div className="flex-1 p-6 overflow-auto bg-gray-50">
               <div className="bg-white rounded-2xl shadow border border-gray-100 overflow-auto">
@@ -584,11 +610,11 @@ export const Dashboard = () => {
                              r.status === 'interviewing' ? '面接中' : '審査中'}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-gray-400 text-xs">{r.createdAt?.toDate().toLocaleDateString('ja-JP')}</td>
+                        <td className="px-4 py-3 text-gray-400 text-xs">{r.created_at ? new Date(r.created_at).toLocaleDateString('ja-JP') : ''}</td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2">
                             <button
-                              onClick={() => { setEditingRecruit(r); setIsRecruitEditOpen(true); }}
+                              onClick={() => { setEditingRecruit(r); setEditPhotoFile(null); setEditPhotoPreview(null); setIsRecruitEditOpen(true); }}
                               className="px-3 py-1.5 bg-brand-blue text-white text-xs font-bold rounded-lg hover:bg-opacity-90 transition-all flex items-center gap-1"
                             >
                               <Edit2 size={12} />編集
@@ -596,7 +622,8 @@ export const Dashboard = () => {
                             <button
                               onClick={async () => {
                                 if (!window.confirm(`${r.nameKanji || r.name} のエントリーを削除しますか？`)) return;
-                                await deleteDoc(doc(db, 'recruits', r.id));
+                                await supabase.from('recruits').delete().eq('id', r.id);
+                                await fetchData();
                               }}
                               className="px-3 py-1.5 bg-red-50 text-red-600 text-xs font-bold rounded-lg hover:bg-red-100 transition-all flex items-center gap-1"
                             >
@@ -617,26 +644,57 @@ export const Dashboard = () => {
             <div className="flex-1 p-8 overflow-y-auto bg-gray-50">
               <div className="max-w-4xl mx-auto">
                 <div className="bg-white p-8 rounded-3xl shadow-xl border border-gray-100 mb-8">
-                  <h3 className="text-xl font-bold text-brand-navy mb-6 flex items-center">
+                  <h3 className="text-xl font-bold text-brand-navy mb-2 flex items-center">
                     <UserPlus size={24} className="mr-2 text-brand-blue" />
-                    新しいスタッフを追加
+                    承認待ち
+                    {pendingStaff.length > 0 && <span className="ml-2 px-2 py-0.5 bg-red-100 text-red-600 text-xs font-bold rounded-full">{pendingStaff.length}</span>}
                   </h3>
-                  <form onSubmit={handleAddAdmin} className="space-y-3">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      <input type="text" placeholder="氏名" value={newAdminName} onChange={e => setNewAdminName(e.target.value)} className="px-4 py-3 bg-gray-100 border-none rounded-xl focus:ring-2 focus:ring-brand-blue outline-none" />
-                      <select value={newAdminRole} onChange={e => setNewAdminRole(e.target.value)} className="px-4 py-3 bg-gray-100 border-none rounded-xl focus:ring-2 focus:ring-brand-blue outline-none">
-                        <option value="admin">管理者</option>
-                        <option value="staff">スタッフ</option>
-                      </select>
-                      <input type="email" placeholder="Googleメールアドレス *" value={newAdminEmail} onChange={e => setNewAdminEmail(e.target.value)} className="px-4 py-3 bg-gray-100 border-none rounded-xl focus:ring-2 focus:ring-brand-blue outline-none" required />
+                  <p className="text-sm text-gray-400 mb-6">ログイン画面から新規登録したスタッフが表示されます。</p>
+                  {pendingStaff.length === 0 ? (
+                    <p className="text-sm text-gray-400 italic">承認待ちのスタッフはいません</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {pendingStaff.map(p => (
+                        <div key={p.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-xl">
+                          <div>
+                            <p className="font-bold text-brand-navy">{p.name}</p>
+                            <p className="text-xs text-gray-400">{p.email}</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <select
+                              id={`role-${p.id}`}
+                              defaultValue="staff"
+                              className="px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-brand-blue"
+                            >
+                              <option value="admin">管理者</option>
+                              <option value="staff">スタッフ</option>
+                            </select>
+                            <button
+                              onClick={async () => {
+                                const role = (document.getElementById(`role-${p.id}`) as HTMLSelectElement).value;
+                                await supabase.from('admin_emails').insert({ email: p.email, name: p.name, role });
+                                await supabase.from('pending_staff').delete().eq('id', p.id);
+                                await fetchData();
+                              }}
+                              className="px-4 py-2 bg-brand-blue text-white text-sm font-bold rounded-lg hover:bg-opacity-90 transition-all"
+                            >
+                              承認
+                            </button>
+                            <button
+                              onClick={async () => {
+                                if (!window.confirm(`${p.name} の申請を却下しますか？`)) return;
+                                await supabase.from('pending_staff').delete().eq('id', p.id);
+                                await fetchData();
+                              }}
+                              className="px-4 py-2 bg-red-50 text-red-600 text-sm font-bold rounded-lg hover:bg-red-100 transition-all"
+                            >
+                              却下
+                            </button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                    <button type="submit" className="px-8 py-3 bg-brand-navy text-white font-bold rounded-xl hover:bg-opacity-90 transition-all shadow-md">
-                      追加する
-                    </button>
-                  </form>
-                  <p className="mt-4 text-sm text-gray-400">
-                    ※追加されたスタッフは、自身のGoogleアカウントでログインすることで管理画面にアクセス可能になります。
-                  </p>
+                  )}
                 </div>
 
                 <div className="bg-white rounded-3xl shadow-xl border border-gray-100 overflow-hidden">
@@ -667,9 +725,9 @@ export const Dashboard = () => {
                             {admin.name && <p className="font-bold text-brand-navy">{admin.name}</p>}
                             <p className="text-xs text-gray-400">{admin.email}</p>
                             <span className={`inline-block mt-1 px-2 py-0.5 rounded-full text-xs font-bold ${
-                              (admin as any).role === 'admin' ? 'bg-brand-blue/10 text-brand-blue' : 'bg-gray-100 text-gray-500'
+                              admin.role === 'admin' ? 'bg-brand-blue/10 text-brand-blue' : 'bg-gray-100 text-gray-500'
                             }`}>
-                              {(admin as any).role === 'admin' ? '管理者' : 'スタッフ'}
+                              {admin.role === 'admin' ? '管理者' : 'スタッフ'}
                             </span>
                           </div>
                         </div>
@@ -699,7 +757,7 @@ export const Dashboard = () => {
               <div className="w-full md:w-1/3 border-r border-gray-200 overflow-y-auto bg-white">
             {activeTab === 'jobs' && filteredData.length > 0 && (
               <div className="p-4 border-b border-gray-100 bg-gray-50/50">
-                <button 
+                <button
                   onClick={() => { setEditingJob(null); setIsJobModalOpen(true); }}
                   className="w-full flex items-center justify-center space-x-2 py-3 bg-white border-2 border-dashed border-brand-blue text-brand-blue rounded-xl hover:bg-brand-blue/5 transition-all font-bold text-sm"
                 >
@@ -712,7 +770,7 @@ export const Dashboard = () => {
               <div className="p-12 text-center text-gray-400">
                 <p className="mb-4">データが見つかりません</p>
                 {activeTab === 'jobs' && (
-                  <button 
+                  <button
                     onClick={() => { setEditingJob(null); setIsJobModalOpen(true); }}
                     className="inline-flex items-center space-x-2 px-6 py-3 bg-brand-navy text-white rounded-xl hover:bg-opacity-90 transition-all shadow-md"
                   >
@@ -736,7 +794,7 @@ export const Dashboard = () => {
                         {activeTab === 'recruits' ? (jobs.find(j => j.id === (entry as RecruitEntry).jobId)?.title || (entry as RecruitEntry).jobTitle || '求人未指定') : activeTab === 'jobs' ? (entry as Job).employmentType : (entry as ContactEntry).companyName}
                       </span>
                       <span className="text-[10px] text-gray-400">
-                        {entry.createdAt?.toDate().toLocaleDateString('ja-JP')}
+                        {(entry as any).created_at ? new Date((entry as any).created_at).toLocaleDateString('ja-JP') : ''}
                       </span>
                     </div>
                     <p className="font-bold text-brand-navy truncate">{activeTab === 'jobs' ? (entry as Job).title : entry.name}</p>
@@ -776,7 +834,7 @@ export const Dashboard = () => {
                       </span>
                       <div className="flex items-center text-xs text-white/60">
                         <Clock size={14} className="mr-1" />
-                        {selectedEntry.createdAt?.toDate().toLocaleString('ja-JP')}
+                        {(selectedEntry as any).created_at ? new Date((selectedEntry as any).created_at).toLocaleString('ja-JP') : ''}
                       </div>
                     </div>
                     <h3 className="text-3xl font-bold mb-2">{activeTab === 'jobs' ? (selectedEntry as Job).title : selectedEntry.name}</h3>
@@ -844,7 +902,6 @@ export const Dashboard = () => {
                               const win = window.open('', '_blank');
                               if (!win) return;
 
-                              // 職務経歴HTML（入れ子テンプレートを避けるため事前生成）
                               let workHtml = '';
                               [1, 2, 3].forEach(function(n) {
                                 const ra = r as any;
@@ -854,14 +911,7 @@ export const Dashboard = () => {
                                 const period  = ra['work' + n + 'Period']  || '';
                                 const details = ra['work' + n + 'Details'] || ra['workHistory' + n] || '';
                                 const label   = n === 1 ? '職務経歴1（現在）' : '職務経歴' + n;
-                                // 期間を「開始年月 / ～ / 終了年月」縦表示に整形
                                 const periodFmt = period.replace(/[〜～]/, '\n～\n');
-                                // セル構造:
-                                // row1: 職務経歴N(rowspan5) | 社名 | val | 職種 | val | 業務内容 | val
-                                // row2: (skip)             | 期間  | 具体的業務・成果(colspan5, rowspan4)
-                                // row3: (skip)             | 〇〇年～〇〇年(rowspan3)  | (details続き)
-                                // row4: (skip)             | (period続き)              | (details続き)
-                                // row5: (skip)             | (period続き)              | (details続き)
                                 workHtml += '<table>'
                                   + '<tr>'
                                   + '<td class="label" rowspan="5" style="width:90px;vertical-align:top">' + label + '</td>'
@@ -895,7 +945,7 @@ export const Dashboard = () => {
                               <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
                                 <div>
                                   <h1 style="margin:0 0 4px 0;font-size:18px">エントリーシート</h1>
-                                  <div style="font-size:10px">作成日: ${r.createdAt?.toDate ? r.createdAt.toDate().toLocaleDateString('ja-JP') : ''}</div>
+                                  <div style="font-size:10px">作成日: ${r.created_at ? new Date(r.created_at).toLocaleDateString('ja-JP') : ''}</div>
                                 </div>
                                 <div class="photo">${r.photoUrl ? `<img src="${r.photoUrl}" style="width:78px;height:98px;object-fit:cover">` : '写真'}</div>
                               </div>
@@ -975,23 +1025,6 @@ export const Dashboard = () => {
                                   <td>${(r as any).emergencyTel || ''}</td>
                                 </tr>
                               </table>
-                              <table style="table-layout:fixed">
-                                <tr>
-                                  <td class="label" rowspan="2" style="width:80px;vertical-align:middle;text-align:center">振込先口座</td>
-                                  <td class="label" style="width:80px;text-align:center">銀行名</td>
-                                  <td class="label" style="width:80px;text-align:center">支店</td>
-                                  <td class="label" style="width:60px;text-align:center">口座種類</td>
-                                  <td class="label" style="width:80px;text-align:center">口座番号</td>
-                                  <td class="label" style="text-align:center">口座名義</td>
-                                </tr>
-                                <tr>
-                                  <td style="word-break:break-all">${(r as any).bankName || ''}</td>
-                                  <td style="word-break:break-all">${(r as any).bankBranch || ''}</td>
-                                  <td style="text-align:center">${(r as any).bankType || ''}</td>
-                                  <td style="word-break:break-all">${(r as any).bankNumber || ''}</td>
-                                  <td style="word-break:break-all">${(r as any).bankHolder || ''}</td>
-                                </tr>
-                              </table>
                               <script>window.onload=function(){window.print()}<\/script>
                               </body></html>`);
                               win.document.close();
@@ -1001,6 +1034,65 @@ export const Dashboard = () => {
                             PDF出力
                           </button>
                         </div>
+
+                        {/* Interview Notes */}
+                        {((selectedEntry as RecruitEntry).status === 'interviewing' || (selectedEntry as RecruitEntry).status === 'hired' || (selectedEntry as RecruitEntry).status === 'rejected') && (
+                          <div className="bg-yellow-50 border border-yellow-200 rounded-2xl p-6 space-y-3">
+                            <div className="flex items-center justify-between">
+                              <h4 className="font-bold text-brand-navy flex items-center">
+                                <Calendar size={18} className="mr-2 text-yellow-600" />
+                                面接メモ
+                              </h4>
+                              <input
+                                type="date"
+                                defaultValue={(selectedEntry as RecruitEntry).interviewDate || ''}
+                                onChange={async (e) => {
+                                  await supabase.from('recruits').update({ interviewDate: e.target.value }).eq('id', selectedEntry.id);
+                                  setRecruits(prev => prev.map(r => r.id === selectedEntry.id ? { ...r, interviewDate: e.target.value } : r));
+                                  setSelectedEntry(prev => prev ? { ...prev as RecruitEntry, interviewDate: e.target.value } : prev);
+                                }}
+                                className="px-3 py-1.5 bg-white border border-yellow-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-yellow-400"
+                              />
+                            </div>
+                            <textarea
+                              defaultValue={(selectedEntry as RecruitEntry).interviewNotes || ''}
+                              key={selectedEntry.id}
+                              rows={5}
+                              placeholder="面接で聞いた内容、印象、特記事項などを自由に記入..."
+                              onBlur={async (e) => {
+                                const val = e.target.value;
+                                await supabase.from('recruits').update({ interviewNotes: val }).eq('id', selectedEntry.id);
+                                setRecruits(prev => prev.map(r => r.id === selectedEntry.id ? { ...r, interviewNotes: val } : r));
+                                setSelectedEntry(prev => prev ? { ...prev as RecruitEntry, interviewNotes: val } : prev);
+                              }}
+                              className="w-full px-4 py-3 bg-white border border-yellow-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-yellow-400 resize-none leading-relaxed"
+                            />
+                          </div>
+                        )}
+
+                        {/* Bank Account (shown only for hired) */}
+                        {(selectedEntry as RecruitEntry).status === 'hired' && (
+                          <div className="bg-green-50 border border-green-200 rounded-2xl p-6 space-y-3">
+                            <h4 className="font-bold text-brand-navy flex items-center">
+                              <DollarSign size={18} className="mr-2 text-green-600" />
+                              振込先口座
+                            </h4>
+                            {(() => {
+                              const ra = selectedEntry as any;
+                              return ra.bankName ? (
+                                <div className="flex flex-wrap gap-4 text-brand-navy text-sm">
+                                  <span>{ra.bankName}</span>
+                                  {ra.bankBranch && <span>{ra.bankBranch}</span>}
+                                  {ra.bankType && <span>{ra.bankType}</span>}
+                                  {ra.bankNumber && <span>口座番号: {ra.bankNumber}</span>}
+                                  {ra.bankHolder && <span className="font-bold">名義: {ra.bankHolder}</span>}
+                                </div>
+                              ) : (
+                                <p className="text-sm text-gray-400 italic">未入力（採用者が口座情報を入力するのを待っています）</p>
+                              );
+                            })()}
+                          </div>
+                        )}
 
                         {/* Photo + basic info */}
                         <div className="flex gap-6 items-start">
@@ -1129,34 +1221,17 @@ export const Dashboard = () => {
                           </div>
                         </div>
 
-                        <div className="space-y-2">
-                          <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">振込先口座</p>
-                          <div className="bg-gray-50 p-4 rounded-xl text-sm space-y-1">
-                            {(() => {
-                              const ra = selectedEntry as any;
-                              return ra.bankName ? (
-                                <div className="flex flex-wrap gap-4 text-brand-navy">
-                                  <span>{ra.bankName}</span>
-                                  {ra.bankBranch && <span>{ra.bankBranch}</span>}
-                                  {ra.bankType && <span>{ra.bankType}</span>}
-                                  {ra.bankNumber && <span>口座番号: {ra.bankNumber}</span>}
-                                  {ra.bankHolder && <span className="font-bold">名義: {ra.bankHolder}</span>}
-                                </div>
-                              ) : <span className="text-gray-400">未記入</span>;
-                            })()}
-                          </div>
-                        </div>
                       </>
                     ) : activeTab === 'jobs' ? (
                       <>
                         <div className="flex space-x-4">
-                          <button 
+                          <button
                             onClick={() => { setEditingJob(selectedEntry as Job); setIsJobModalOpen(true); }}
                             className="flex-1 py-3 bg-brand-blue text-white font-bold rounded-xl flex items-center justify-center hover:bg-opacity-90 transition-all"
                           >
                             <Edit2 size={18} className="mr-2" /> 編集する
                           </button>
-                          <button 
+                          <button
                             onClick={() => handleDeleteJob(selectedEntry.id)}
                             className="flex-1 py-3 bg-red-50 text-red-600 font-bold rounded-xl flex items-center justify-center hover:bg-red-100 transition-all"
                           >
@@ -1179,7 +1254,6 @@ export const Dashboard = () => {
                           </div>
                         </div>
 
-                        {/* Applicants for this job */}
                         <div className="border-t border-gray-100 pt-8">
                           <h4 className="text-lg font-bold text-brand-navy mb-4 flex items-center">
                             <Users size={20} className="mr-2 text-brand-blue" />
@@ -1192,7 +1266,7 @@ export const Dashboard = () => {
                                   <p className="font-bold text-brand-navy">{applicant.name}</p>
                                   <p className="text-xs text-gray-500">{applicant.email}</p>
                                 </div>
-                                <button 
+                                <button
                                   onClick={() => { setActiveTab('recruits'); setSelectedEntry(applicant); }}
                                   className="text-brand-blue text-xs font-bold hover:underline"
                                 >
@@ -1230,7 +1304,7 @@ export const Dashboard = () => {
       )}
     </div>
   </main>
-      
+
       {/* Mobile Floating Action Button */}
       {activeTab === 'jobs' && (
         <button
@@ -1266,7 +1340,7 @@ export const Dashboard = () => {
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-gray-500">役割</label>
-                  <select name="role" defaultValue={(editingAdmin as any).role || 'staff'} className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-brand-blue">
+                  <select name="role" defaultValue={editingAdmin.role || 'staff'} className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-brand-blue">
                     <option value="admin">管理者</option>
                     <option value="staff">スタッフ</option>
                   </select>
@@ -1296,6 +1370,42 @@ export const Dashboard = () => {
                 <button onClick={() => setIsRecruitEditOpen(false)} className="p-2 hover:bg-gray-200 rounded-full transition-all"><X size={20} /></button>
               </div>
               <form onSubmit={handleUpdateRecruit} className="p-6 space-y-6 max-h-[80vh] overflow-y-auto">
+                {/* 写真 */}
+                <div>
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">履歴書写真</p>
+                  <div className="flex items-start gap-4">
+                    <div className="w-20 h-26 bg-gray-100 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center overflow-hidden shrink-0">
+                      {editPhotoPreview ? (
+                        <img src={editPhotoPreview} alt="プレビュー" className="w-full h-full object-cover" />
+                      ) : editingRecruit.photoUrl ? (
+                        <img src={editingRecruit.photoUrl} alt="現在の写真" className="w-full h-full object-cover" />
+                      ) : (
+                        <Camera size={24} className="text-gray-300" />
+                      )}
+                    </div>
+                    <div className="flex-1 space-y-2">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            setEditPhotoFile(file);
+                            const reader = new FileReader();
+                            reader.onload = (evt) => setEditPhotoPreview(evt.target?.result as string);
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                        className="hidden"
+                        id="edit-photo-upload"
+                      />
+                      <label htmlFor="edit-photo-upload" className="inline-block px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-100 transition-all text-xs font-bold text-brand-navy">
+                        写真を{editingRecruit.photoUrl ? '変更' : '追加'}する
+                      </label>
+                      <p className="text-xs text-gray-400">JPG・PNG形式</p>
+                    </div>
+                  </div>
+                </div>
                 {/* 基本情報 */}
                 <div>
                   <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">基本情報</p>
@@ -1342,7 +1452,7 @@ export const Dashboard = () => {
                   <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">学歴・職歴</p>
                   <div className="grid grid-cols-2 gap-3 mb-3">
                     <div className="space-y-1">
-                      <label className="text-xs font-bold text-gray-500">学校名（卒業年月）</label>
+                      <label className="text-xs font-bold text-gray-500">卒業年月</label>
                       <input name="educationDate" defaultValue={(editingRecruit as any).educationDate || ''} className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-brand-blue" />
                     </div>
                     <div className="space-y-1">
@@ -1387,9 +1497,18 @@ export const Dashboard = () => {
                     ))}
                   </div>
                 </div>
+                {/* 面接メモ */}
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-gray-500">面接日</label>
+                  <input name="interviewDate" type="date" defaultValue={(editingRecruit as any).interviewDate || ''} className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-brand-blue" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-gray-500">面接メモ</label>
+                  <textarea name="interviewNotes" defaultValue={editingRecruit.interviewNotes || ''} rows={4} className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-brand-blue resize-none" placeholder="面接で聞いた内容、印象、特記事項など" />
+                </div>
                 {/* 振込先 */}
                 <div>
-                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">振込先口座</p>
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">振込先口座（採用決定後に入力）</p>
                   <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                     {[
                       { name: 'bankName', label: '銀行名' },

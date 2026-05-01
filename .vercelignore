@@ -1,0 +1,7 @@
+migrate-*.html
+migrate-*.cjs
+migrate-*.sql
+firebase-export.json
+.claude/
+docs/
+supabase-schema.sql

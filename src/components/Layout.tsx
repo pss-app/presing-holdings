@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { name: 'Home', path: '/' },
   { name: 'Business', path: '/business' },
   { name: 'Company', path: '/company' },
+  { name: 'PresingIC', path: '/presingic' },
   { name: 'Recruit / Contact', path: '/contact' },
 ];
 
@@ -112,8 +113,8 @@ export const Footer = () => {
           </div>
           <div>
             <h4 className="font-bold mb-6">Contact</h4>
-            <p className="text-sm text-gray-400 mb-2">プレジング・ホールディングス株式会社</p>
-            <p className="text-sm text-gray-400">〒000-0000 東京都〇〇区〇〇 0-0-0</p>
+            <p className="text-sm text-gray-400 mb-2">株式会社Presingホールディングス</p>
+            <p className="text-sm text-gray-400">東京都渋谷区神南1丁目10-5 ラヴィスタ渋谷5F</p>
           </div>
         </div>
         <div className="mt-16 pt-8 border-t border-white/10 flex flex-col md:flex-row items-center justify-between gap-4">

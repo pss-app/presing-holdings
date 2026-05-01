@@ -6,6 +6,7 @@ import { Business } from './pages/Business';
 import { Company } from './pages/Company';
 import { Contact } from './pages/Contact';
 import { Dashboard } from './pages/Dashboard';
+import { PresingIC } from './pages/PresingIC';
 
 function ScrollToTop() {
   const { pathname } = useLocation();
@@ -29,6 +30,7 @@ export default function App() {
             <Route path="/business" element={<Business />} />
             <Route path="/company" element={<Company />} />
             <Route path="/contact" element={<Contact />} />
+            <Route path="/presingic" element={<PresingIC />} />
             <Route path="/dashboard" element={<Dashboard />} />
           </Routes>
         </main>

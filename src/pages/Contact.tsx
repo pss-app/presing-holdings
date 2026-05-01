@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion } from 'motion/react';
 import { Send, CheckCircle2, AlertCircle, Loader2, Briefcase, MapPin, Camera } from 'lucide-react';
-import { db, storage, collection, addDoc, serverTimestamp, handleFirestoreError, OperationType, query, where, onSnapshot, ref, uploadBytes, getDownloadURL } from '../firebase';
+import { supabase } from '../supabase';
 
 interface Job {
   id: string;
@@ -29,14 +29,10 @@ export const Contact = () => {
   const formRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
-    const q = query(collection(db, 'jobs'), where('status', '==', 'active'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Job));
-      setJobs(data);
-    }, (err) => {
-      console.error('Error fetching jobs:', err);
-    });
-    return () => unsubscribe();
+    supabase.from('jobs').select('*').eq('status', 'active')
+      .then(({ data }) => {
+        if (data) setJobs(data as Job[]);
+      });
   }, []);
 
   const scrollToForm = (jobId?: string) => {
@@ -68,20 +64,25 @@ export const Contact = () => {
           name: formData.get('name') as string,
           email: formData.get('email') as string,
           content: formData.get('content') as string,
-          createdAt: serverTimestamp(),
         };
-        await addDoc(collection(db, 'contacts'), contactData);
+        const { error: insertError } = await supabase.from('contacts').insert(contactData);
+        if (insertError) throw insertError;
       } else {
         // Upload photo if provided
         let photoUrl = '';
         if (photoFile) {
-          try {
-            const storageRef = ref(storage, `recruit-photos/${Date.now()}-${photoFile.name}`);
-            const snapshot = await uploadBytes(storageRef, photoFile);
-            photoUrl = await getDownloadURL(snapshot.ref);
-          } catch (uploadErr) {
-            console.error('Photo upload error:', uploadErr);
-            // Continue without photo if upload fails
+          const filePath = `${Date.now()}-${photoFile.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+          const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('recruit-photos')
+            .upload(filePath, photoFile);
+          if (uploadError) {
+            throw new Error('写真のアップロードに失敗しました。もう一度お試しください。');
+          }
+          if (uploadData) {
+            const { data: urlData } = supabase.storage
+              .from('recruit-photos')
+              .getPublicUrl(uploadData.path);
+            photoUrl = urlData.publicUrl;
           }
         }
 
@@ -129,17 +130,12 @@ export const Contact = () => {
           emergencyName: formData.get('emergencyName') as string,
           emergencyRelation: formData.get('emergencyRelation') as string,
           emergencyTel: formData.get('emergencyTel') as string,
-          bankName: formData.get('bankName') as string,
-          bankBranch: formData.get('bankBranch') as string,
-          bankType: formData.get('bankType') as string,
-          bankNumber: formData.get('bankNumber') as string,
-          bankHolder: formData.get('bankHolder') as string,
           status: 'pending',
-          createdAt: serverTimestamp(),
         };
         if (photoUrl) recruitData.photoUrl = photoUrl;
 
-        await addDoc(collection(db, 'recruits'), recruitData);
+        const { error: insertError } = await supabase.from('recruits').insert(recruitData);
+        if (insertError) throw insertError;
       }
 
       setIsSubmitted(true);
@@ -148,7 +144,6 @@ export const Contact = () => {
     } catch (err) {
       console.error('Submission error:', err);
       setError('送信中にエラーが発生しました。時間をおいて再度お試しください。');
-      handleFirestoreError(err, OperationType.WRITE, activeTab === 'contact' ? 'contacts' : 'recruits');
     } finally {
       setIsSubmitting(false);
     }
@@ -381,7 +376,7 @@ export const Contact = () => {
                         </div>
                       </div>
 
-                      {/* 行2: 年齢・性別・自家用車 */}
+                      {/* 行2: 性別・自家用車 */}
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         <div className="space-y-2">
                           <label className={labelClass}>性別</label>
@@ -568,36 +563,6 @@ export const Contact = () => {
                       </div>
                     </div>
 
-                    {/* ── 振込先口座 ── */}
-                    <div className={sectionClass}>
-                      <h3 className="font-bold text-brand-navy text-lg">振込先口座 *</h3>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className="space-y-1">
-                          <label className={labelClass}>銀行名</label>
-                          <input name="bankName" required className={inputClass} placeholder="〇〇銀行" />
-                        </div>
-                        <div className="space-y-1">
-                          <label className={labelClass}>支店名</label>
-                          <input name="bankBranch" required className={inputClass} placeholder="渋谷支店" />
-                        </div>
-                        <div className="space-y-1">
-                          <label className={labelClass}>口座種類</label>
-                          <select name="bankType" required className={inputClass}>
-                            <option value="">選択してください</option>
-                            <option value="普通">普通</option>
-                            <option value="当座">当座</option>
-                          </select>
-                        </div>
-                        <div className="space-y-1">
-                          <label className={labelClass}>口座番号</label>
-                          <input name="bankNumber" required className={inputClass} placeholder="1234567" />
-                        </div>
-                        <div className="md:col-span-2 space-y-1">
-                          <label className={labelClass}>口座名義（カタカナ）</label>
-                          <input name="bankHolder" required className={inputClass} placeholder="ヤマダ タロウ" />
-                        </div>
-                      </div>
-                    </div>
                   </>
                 )}
 
