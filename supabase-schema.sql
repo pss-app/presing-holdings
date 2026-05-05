@@ -8,9 +8,13 @@ CREATE TABLE IF NOT EXISTS jobs (
   description TEXT NOT NULL,
   requirements TEXT,
   location TEXT NOT NULL,
+  prefecture TEXT,
+  city TEXT,
   salary TEXT,
   "employmentType" TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'active',
+  "startDate" DATE,
+  "endDate" DATE,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   "updatedAt" TIMESTAMPTZ
 );

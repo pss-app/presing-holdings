@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { Send, CheckCircle2, AlertCircle, Loader2, Briefcase, MapPin, Camera } from 'lucide-react';
+import { Send, CheckCircle2, AlertCircle, Loader2, Briefcase, MapPin, Camera, Search } from 'lucide-react';
 import { supabase } from '../supabase';
 
 interface Job {
@@ -9,8 +9,12 @@ interface Job {
   description: string;
   requirements: string;
   location: string;
+  prefecture: string | null;
+  city: string | null;
   employmentType: string;
   salary: string;
+  startDate: string | null;
+  endDate: string | null;
 }
 
 const inputClass = "w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-blue focus:border-transparent outline-none transition-all";
@@ -26,14 +30,32 @@ export const Contact = () => {
   const [selectedJobId, setSelectedJobId] = React.useState<string>('');
   const [photoFile, setPhotoFile] = React.useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = React.useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = React.useState('');
+  const [searchPrefecture, setSearchPrefecture] = React.useState('');
   const formRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
     supabase.from('jobs').select('*').eq('status', 'active')
       .then(({ data }) => {
-        if (data) setJobs(data as Job[]);
+        if (data) {
+          const today = new Date().toISOString().slice(0, 10);
+          const filtered = (data as Job[]).filter(job => {
+            if (job.startDate && job.startDate > today) return false;
+            if (job.endDate && job.endDate < today) return false;
+            return true;
+          });
+          setJobs(filtered);
+        }
       });
   }, []);
+
+  const filteredJobs = React.useMemo(() => {
+    return jobs.filter(job => {
+      if (searchPrefecture && (job.prefecture || '') !== searchPrefecture) return false;
+      if (searchQuery && !job.title.includes(searchQuery) && !(job.prefecture || '').includes(searchQuery) && !(job.city || '').includes(searchQuery)) return false;
+      return true;
+    });
+  }, [jobs, searchQuery, searchPrefecture]);
 
   const scrollToForm = (jobId?: string) => {
     if (jobId) setSelectedJobId(jobId);
@@ -187,9 +209,35 @@ export const Contact = () => {
                 <p className="text-lg text-gray-500">あなたの経験やスキルを活かせる環境がここにあります。</p>
               </div>
 
+              {/* Search Bar */}
+              {jobs.length > 0 && (
+                <div className="flex flex-col sm:flex-row gap-4 max-w-2xl mx-auto">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                    <input
+                      type="text"
+                      placeholder="案件名で検索..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full pl-12 pr-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-blue outline-none transition-all"
+                    />
+                  </div>
+                  <select
+                    value={searchPrefecture}
+                    onChange={(e) => setSearchPrefecture(e.target.value)}
+                    className="px-4 py-3 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-blue outline-none transition-all"
+                  >
+                    <option value="">全ての都道府県</option>
+                    {['北海道','青森県','岩手県','宮城県','秋田県','山形県','福島県','茨城県','栃木県','群馬県','埼玉県','千葉県','東京都','神奈川県','新潟県','富山県','石川県','福井県','山梨県','長野県','岐阜県','静岡県','愛知県','三重県','滋賀県','京都府','大阪府','兵庫県','奈良県','和歌山県','鳥取県','島根県','岡山県','広島県','山口県','徳島県','香川県','愛媛県','高知県','福岡県','佐賀県','長崎県','熊本県','大分県','宮崎県','鹿児島県','沖縄県'].map(p => (
+                      <option key={p} value={p}>{p}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 gap-8">
-                {jobs.length > 0 ? (
-                  jobs.map((job) => (
+                {filteredJobs.length > 0 ? (
+                  filteredJobs.map((job) => (
                     <motion.div
                       key={job.id}
                       initial={{ opacity: 0, y: 20 }}
@@ -203,7 +251,7 @@ export const Contact = () => {
                             <span className="px-4 py-1.5 bg-brand-blue text-white text-xs font-bold rounded-full uppercase tracking-widest">{job.employmentType}</span>
                             <span className="flex items-center text-gray-500 font-medium">
                               <MapPin size={16} className="mr-1.5 text-brand-blue" />
-                              {job.location}
+                              {job.prefecture || ''}{job.city ? ` ${job.city}` : ''}{!job.prefecture && job.location ? job.location : ''}
                             </span>
                           </div>
                           <h3 className="text-3xl font-bold text-brand-navy mb-3">{job.title}</h3>
@@ -238,8 +286,17 @@ export const Contact = () => {
                 ) : (
                   <div className="bg-white/50 backdrop-blur-sm p-16 rounded-[2.5rem] border-2 border-dashed border-gray-300 text-center">
                     <Briefcase size={48} className="mx-auto text-gray-300 mb-6" />
-                    <p className="text-xl font-bold text-gray-400 mb-2">現在、公開中の募集案件はありません</p>
-                    <p className="text-gray-400">オープンポジションでのエントリーをご検討ください。</p>
+                    {(searchQuery || searchPrefecture) ? (
+                      <>
+                        <p className="text-xl font-bold text-gray-400 mb-2">条件に一致する案件が見つかりません</p>
+                        <p className="text-gray-400">検索条件を変更してお試しください。</p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-xl font-bold text-gray-400 mb-2">現在、公開中の募集案件はありません</p>
+                        <p className="text-gray-400">オープンポジションでのエントリーをご検討ください。</p>
+                      </>
+                    )}
                   </div>
                 )}
               </div>

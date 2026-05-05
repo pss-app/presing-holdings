@@ -94,11 +94,15 @@ interface Job {
   id: string;
   title: string;
   location: string;
+  prefecture: string;
+  city: string;
   employmentType: string;
   salary: string;
   description: string;
   requirements: string;
   status: 'active' | 'closed';
+  startDate: string | null;
+  endDate: string | null;
   created_at: string;
 }
 
@@ -114,6 +118,7 @@ export const Dashboard = () => {
   const [newAdminName, setNewAdminName] = React.useState('');
   const [newAdminRole, setNewAdminRole] = React.useState('staff');
   const [searchTerm, setSearchTerm] = React.useState('');
+  const [filterJobId, setFilterJobId] = React.useState<string>('');
   const [selectedEntry, setSelectedEntry] = React.useState<ContactEntry | RecruitEntry | Job | null>(null);
   const [isJobModalOpen, setIsJobModalOpen] = React.useState(false);
   const [editingJob, setEditingJob] = React.useState<Job | null>(null);
@@ -209,14 +214,22 @@ export const Dashboard = () => {
     e.preventDefault();
     setIsSubmitting(true);
     const formData = new FormData(e.currentTarget);
+    const prefecture = formData.get('prefecture') as string;
+    const city = formData.get('city') as string;
+    const startDate = formData.get('startDate') as string;
+    const endDate = formData.get('endDate') as string;
     const jobData = {
       title: formData.get('title') as string,
-      location: formData.get('location') as string,
+      location: [prefecture, city].filter(Boolean).join(' ') || '',
+      prefecture: prefecture || null,
+      city: city || null,
       employmentType: formData.get('employmentType') as string,
       salary: formData.get('salary') as string,
       description: formData.get('description') as string,
       requirements: formData.get('requirements') as string,
       status: formData.get('status') as 'active' | 'closed',
+      startDate: startDate || null,
+      endDate: endDate || null,
     };
 
     try {
@@ -441,8 +454,13 @@ export const Dashboard = () => {
   const filteredData = activeTab === 'contacts'
     ? contacts.filter(c => c.name.includes(searchTerm) || c.companyName.includes(searchTerm) || c.content.includes(searchTerm))
     : activeTab === 'recruits'
-    ? recruits.filter(r => r.name.includes(searchTerm) || (r.nameKana || '').includes(searchTerm) || (r.nearestStation || '').includes(searchTerm) || (r.education || '').includes(searchTerm))
-    : jobs.filter(j => j.title.includes(searchTerm) || j.location.includes(searchTerm) || j.description.includes(searchTerm));
+    ? recruits.filter(r => {
+      if (filterJobId === '__none__' && r.jobId) return false;
+      if (filterJobId && filterJobId !== '__none__' && r.jobId !== filterJobId) return false;
+      const jobTitle = jobs.find(j => j.id === r.jobId)?.title || '';
+      return r.name.includes(searchTerm) || (r.nameKana || '').includes(searchTerm) || (r.nearestStation || '').includes(searchTerm) || (r.education || '').includes(searchTerm) || jobTitle.includes(searchTerm);
+    })
+    : jobs.filter(j => j.title.includes(searchTerm) || (j.prefecture || '').includes(searchTerm) || (j.city || '').includes(searchTerm) || j.location.includes(searchTerm) || j.description.includes(searchTerm));
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col lg:flex-row">
@@ -552,7 +570,20 @@ export const Dashboard = () => {
             )}
           </div>
 
-          <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-4 flex-wrap gap-2">
+            {(activeTab === 'recruits' || activeTab === 'recruitTable') && (
+              <select
+                value={filterJobId}
+                onChange={(e) => setFilterJobId(e.target.value)}
+                className="px-4 py-2 bg-gray-100 border-none rounded-xl focus:ring-2 focus:ring-brand-blue outline-none text-sm"
+              >
+                <option value="">すべての案件</option>
+                {jobs.map(j => (
+                  <option key={j.id} value={j.id}>{j.title}</option>
+                ))}
+                <option value="__none__">案件未選択</option>
+              </select>
+            )}
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
               <input
@@ -570,6 +601,29 @@ export const Dashboard = () => {
         <div className="flex-1 flex overflow-hidden">
           {activeTab === 'recruitTable' ? (
             <div className="flex-1 p-6 overflow-auto bg-gray-50">
+              <div className="mb-4 flex items-center gap-4">
+                <select
+                  value={filterJobId}
+                  onChange={(e) => setFilterJobId(e.target.value)}
+                  className="px-4 py-2 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-blue outline-none text-sm shadow-sm"
+                >
+                  <option value="">すべての案件</option>
+                  {jobs.map(j => (
+                    <option key={j.id} value={j.id}>{j.title}</option>
+                  ))}
+                  <option value="__none__">案件未選択</option>
+                </select>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                  <input
+                    type="text"
+                    placeholder="名前・フリガナで検索..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pl-9 pr-4 py-2 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-brand-blue outline-none text-sm w-64 shadow-sm"
+                  />
+                </div>
+              </div>
               <div className="bg-white rounded-2xl shadow border border-gray-100 overflow-auto">
                 <table className="w-full text-sm whitespace-nowrap">
                   <thead>
@@ -588,7 +642,12 @@ export const Dashboard = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {recruits.map((r, i) => (
+                    {recruits.filter(r => {
+                      if (filterJobId === '__none__' && r.jobId) return false;
+                      if (filterJobId && filterJobId !== '__none__' && r.jobId !== filterJobId) return false;
+                      if (searchTerm && !(r.name.includes(searchTerm) || (r.nameKana || '').includes(searchTerm) || (r.nameKanji || '').includes(searchTerm))) return false;
+                      return true;
+                    }).map((r, i) => (
                       <tr key={r.id} className={`border-t border-gray-100 hover:bg-blue-50 transition-colors ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}`}>
                         <td className="px-4 py-3 font-bold text-brand-navy">{r.nameKanji || r.name}</td>
                         <td className="px-4 py-3 text-gray-500">{r.nameKana || ''}</td>
@@ -843,12 +902,18 @@ export const Dashboard = () => {
                         <>
                           <div className="flex items-center text-sm text-white/80">
                             <MapPin size={16} className="mr-2" />
-                            {(selectedEntry as Job).location}
+                            {(selectedEntry as Job).prefecture || ''}{(selectedEntry as Job).city ? ` ${(selectedEntry as Job).city}` : ''}{!(selectedEntry as Job).prefecture && (selectedEntry as Job).location ? (selectedEntry as Job).location : ''}
                           </div>
                           <div className="flex items-center text-sm text-white/80">
                             <DollarSign size={16} className="mr-2" />
                             {(selectedEntry as Job).salary}
                           </div>
+                          {(selectedEntry as Job).startDate && (
+                            <div className="flex items-center text-sm text-white/80">
+                              <Calendar size={16} className="mr-2" />
+                              {(selectedEntry as Job).startDate}{(selectedEntry as Job).endDate ? ` 〜 ${(selectedEntry as Job).endDate}` : ' 〜'}
+                            </div>
+                          )}
                         </>
                       ) : (
                         <>
@@ -1569,12 +1634,6 @@ export const Dashboard = () => {
                     <input name="title" type="text" required defaultValue={editingJob?.title} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-brand-blue" />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-sm font-bold text-brand-navy">勤務地</label>
-                    <input name="location" type="text" required defaultValue={editingJob?.location} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-brand-blue" />
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
                     <label className="text-sm font-bold text-brand-navy">雇用形態</label>
                     <select name="employmentType" defaultValue={editingJob?.employmentType || '正社員'} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-brand-blue">
                       <option value="正社員">正社員</option>
@@ -1583,17 +1642,44 @@ export const Dashboard = () => {
                       <option value="業務委託">業務委託</option>
                     </select>
                   </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <label className="text-sm font-bold text-brand-navy">勤務地（県）</label>
+                    <select name="prefecture" defaultValue={editingJob?.prefecture || ''} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-brand-blue">
+                      <option value="">選択してください</option>
+                      {['北海道','青森県','岩手県','宮城県','秋田県','山形県','福島県','茨城県','栃木県','群馬県','埼玉県','千葉県','東京都','神奈川県','新潟県','富山県','石川県','福井県','山梨県','長野県','岐阜県','静岡県','愛知県','三重県','滋賀県','京都府','大阪府','兵庫県','奈良県','和歌山県','鳥取県','島根県','岡山県','広島県','山口県','徳島県','香川県','愛媛県','高知県','福岡県','佐賀県','長崎県','熊本県','大分県','宮崎県','鹿児島県','沖縄県'].map(p => (
+                        <option key={p} value={p}>{p}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-bold text-brand-navy">勤務地（市区町村）</label>
+                    <input name="city" type="text" defaultValue={editingJob?.city || ''} placeholder="例: 広島市中区" className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-brand-blue" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2">
                     <label className="text-sm font-bold text-brand-navy">給与目安</label>
                     <input name="salary" type="text" required defaultValue={editingJob?.salary} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-brand-blue" />
                   </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-bold text-brand-navy">ステータス</label>
+                    <select name="status" defaultValue={editingJob?.status || 'active'} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-brand-blue">
+                      <option value="active">募集中</option>
+                      <option value="closed">募集終了</option>
+                    </select>
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-bold text-brand-navy">ステータス</label>
-                  <select name="status" defaultValue={editingJob?.status || 'active'} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-brand-blue">
-                    <option value="active">募集中</option>
-                    <option value="closed">募集終了</option>
-                  </select>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <label className="text-sm font-bold text-brand-navy">掲載開始日</label>
+                    <input name="startDate" type="date" defaultValue={editingJob?.startDate || ''} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-brand-blue" />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-bold text-brand-navy">掲載終了日</label>
+                    <input name="endDate" type="date" defaultValue={editingJob?.endDate || ''} className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg outline-none focus:ring-2 focus:ring-brand-blue" />
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-bold text-brand-navy">業務内容</label>
