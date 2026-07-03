@@ -142,3 +142,23 @@ CREATE POLICY "recruits_admin_delete" ON recruits FOR DELETE USING (is_admin());
 
 -- Admin emails: 管理者のみ
 CREATE POLICY "admin_emails_admin_all" ON admin_emails FOR ALL USING (is_admin());
+
+-- Interviews table（面談記録：1応募者に複数回ぶら下がる）
+CREATE TABLE IF NOT EXISTS interviews (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  "recruitId" UUID REFERENCES recruits(id) ON DELETE CASCADE,
+  type TEXT NOT NULL DEFAULT 'hiring',      -- hiring(採用面談) / followup(稼働フォロー)
+  interviewer TEXT,                          -- 面接担当（ログイン中スタッフ）
+  "interviewDate" DATE,
+  result TEXT,                               -- pass / hold / fail
+  responses JSONB DEFAULT '{}'::jsonb,       -- 各ページの面談メモを section単位で保存
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  "updatedAt" TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS interviews_recruit_idx ON interviews("recruitId");
+
+ALTER TABLE interviews ENABLE ROW LEVEL SECURITY;
+
+-- Interviews: 管理者のみ
+CREATE POLICY "interviews_admin_all" ON interviews FOR ALL USING (is_admin());

@@ -27,10 +27,13 @@ import {
   ShieldCheck,
   UserPlus,
   Table2,
-  Camera
+  Camera,
+  LayoutGrid
 } from 'lucide-react';
 import { supabase } from '../supabase';
 import type { User } from '@supabase/supabase-js';
+import { KanbanBoard } from '../components/KanbanBoard';
+import { InterviewWizard, type Interview } from '../components/InterviewWizard';
 
 interface ContactEntry {
   id: string;
@@ -109,10 +112,12 @@ interface Job {
 export const Dashboard = () => {
   const [user, setUser] = React.useState<User | null>(null);
   const [loading, setLoading] = React.useState(true);
-  const [activeTab, setActiveTab] = React.useState<'contacts' | 'recruits' | 'jobs' | 'staff' | 'recruitTable'>('recruits');
+  const [activeTab, setActiveTab] = React.useState<'contacts' | 'recruits' | 'jobs' | 'staff' | 'recruitTable' | 'board'>('board');
   const [contacts, setContacts] = React.useState<ContactEntry[]>([]);
   const [recruits, setRecruits] = React.useState<RecruitEntry[]>([]);
   const [jobs, setJobs] = React.useState<Job[]>([]);
+  const [interviews, setInterviews] = React.useState<Interview[]>([]);
+  const [interviewRecruit, setInterviewRecruit] = React.useState<RecruitEntry | null>(null);
   const [adminEmails, setAdminEmails] = React.useState<{email: string; name?: string; role?: string}[]>([]);
   const [editingAdmin, setEditingAdmin] = React.useState<{email: string; name?: string; role?: string} | null>(null);
   const [newAdminName, setNewAdminName] = React.useState('');
@@ -127,7 +132,6 @@ export const Dashboard = () => {
   const [newAdminEmail, setNewAdminEmail] = React.useState('');
   const [editingRecruit, setEditingRecruit] = React.useState<RecruitEntry | null>(null);
   const [isRecruitEditOpen, setIsRecruitEditOpen] = React.useState(false);
-  const [recruitDetailTab, setRecruitDetailTab] = React.useState<'info' | 'interview' | 'bank'>('info');
   const [editPhotoFile, setEditPhotoFile] = React.useState<File | null>(null);
   const [editPhotoPreview, setEditPhotoPreview] = React.useState<string | null>(null);
   const [loginEmail, setLoginEmail] = React.useState('');
@@ -141,19 +145,37 @@ export const Dashboard = () => {
   const BOOTSTRAP_ADMIN = 'presingsocialservice@gmail.com';
 
   const fetchData = React.useCallback(async () => {
-    const [c, r, j, a, p] = await Promise.all([
+    const [c, r, j, a, p, iv] = await Promise.all([
       supabase.from('contacts').select('*').order('created_at', { ascending: false }),
       supabase.from('recruits').select('*').order('created_at', { ascending: false }),
       supabase.from('jobs').select('*').order('created_at', { ascending: false }),
       supabase.from('admin_emails').select('*'),
       supabase.from('pending_staff').select('*').order('created_at', { ascending: false }),
+      supabase.from('interviews').select('id, recruitId'),
     ]);
     if (c.data) setContacts(c.data as ContactEntry[]);
     if (r.data) setRecruits(r.data as RecruitEntry[]);
     if (j.data) setJobs(j.data as Job[]);
     if (a.data) setAdminEmails(a.data);
     if (p.data) setPendingStaff(p.data);
+    if (iv.data) setInterviews(iv.data as Interview[]);
   }, []);
+
+  const interviewCounts = React.useMemo(() => {
+    const m: Record<string, number> = {};
+    interviews.forEach((i) => { if (i.recruitId) m[i.recruitId] = (m[i.recruitId] || 0) + 1; });
+    return m;
+  }, [interviews]);
+
+  const refreshInterviews = React.useCallback(async () => {
+    const { data } = await supabase.from('interviews').select('id, recruitId');
+    if (data) setInterviews(data as Interview[]);
+  }, []);
+
+  const staffName = React.useMemo(() => {
+    const me = adminEmails.find((a) => a.email === user?.email);
+    return me?.name || user?.email || '';
+  }, [adminEmails, user]);
 
   React.useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -486,6 +508,15 @@ export const Dashboard = () => {
 
         <nav className="flex-1 p-4 space-y-2">
           <button
+            onClick={() => { setActiveTab('board'); setSelectedEntry(null); }}
+            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all ${
+              activeTab === 'board' ? 'bg-brand-blue text-white' : 'text-gray-400 hover:bg-white/5'
+            }`}
+          >
+            <LayoutGrid size={20} />
+            <span className="font-bold">選考ボード</span>
+          </button>
+          <button
             onClick={() => { setActiveTab('recruits'); setSelectedEntry(null); }}
             className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl transition-all ${
               activeTab === 'recruits' ? 'bg-brand-blue text-white' : 'text-gray-400 hover:bg-white/5'
@@ -553,7 +584,8 @@ export const Dashboard = () => {
         <header className="bg-white border-b border-gray-200 p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center space-x-4">
             <h2 className="text-2xl font-bold text-brand-navy">
-              {activeTab === 'recruits' ? '採用エントリー一覧' :
+              {activeTab === 'board' ? '選考ボード' :
+               activeTab === 'recruits' ? '採用エントリー一覧' :
                activeTab === 'recruitTable' ? 'エントリー管理表' :
                activeTab === 'jobs' ? '案件管理' :
                activeTab === 'staff' ? 'スタッフ管理' :
@@ -599,7 +631,15 @@ export const Dashboard = () => {
 
         {/* Content Area */}
         <div className="flex-1 flex overflow-hidden">
-          {activeTab === 'recruitTable' ? (
+          {activeTab === 'board' ? (
+            <KanbanBoard
+              recruits={recruits}
+              jobs={jobs}
+              interviewCounts={interviewCounts}
+              onStatusChange={updateRecruitStatus}
+              onOpenInterview={(r) => setInterviewRecruit(r as RecruitEntry)}
+            />
+          ) : activeTab === 'recruitTable' ? (
             <div className="flex-1 p-6 overflow-auto bg-gray-50">
               <div className="mb-4 flex items-center gap-4">
                 <select
@@ -961,6 +1001,7 @@ export const Dashboard = () => {
                               ))}
                             </div>
                           </div>
+                          <div className="flex flex-wrap gap-2">
                           <button
                             onClick={() => {
                               const r = selectedEntry as RecruitEntry;
@@ -1098,6 +1139,13 @@ export const Dashboard = () => {
                           >
                             PDF出力
                           </button>
+                          <button
+                            onClick={() => setInterviewRecruit(selectedEntry as RecruitEntry)}
+                            className="px-4 py-2 bg-brand-navy text-white text-sm font-bold rounded-xl hover:bg-opacity-90 transition-all shadow-md whitespace-nowrap flex items-center gap-1.5"
+                          >
+                            <MessageSquare size={16} />面談する
+                          </button>
+                          </div>
                         </div>
 
                         {/* Interview Notes */}
@@ -1606,6 +1654,18 @@ export const Dashboard = () => {
               </form>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+
+      {/* Interview Wizard */}
+      <AnimatePresence>
+        {interviewRecruit && (
+          <InterviewWizard
+            recruit={interviewRecruit}
+            interviewer={staffName}
+            onClose={() => setInterviewRecruit(null)}
+            onChange={refreshInterviews}
+          />
         )}
       </AnimatePresence>
 
